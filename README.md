@@ -191,6 +191,16 @@ way to explore the same data the static script produces; it doesn't replace
   types, which a bare `json.dumps` chokes on); the page then calls
   `Plotly.newPlot` once on load and `Plotly.react` on every filter change
   with that JSON, updating the existing chart in place.
+- **Diagramming the dashboard's request/response cycle in LaTeX.** Writing
+  the sequence diagram for `docs/explainers/deep-dive.pdf` (browser to Flask
+  to the in-memory dataframe and back) meant putting multi-line labels on
+  TikZ edges, e.g. `node[above]{POST /api/filter\\(organisations,
+  countries,...)}`. TikZ nodes don't support `\\` for a line break unless
+  `align` is set on that node (or inherited via `every node/.style`); without
+  it, pdflatex failed on every such label with the unhelpful `LaTeX Error:
+  Something's wrong--perhaps a missing \item`, which points nowhere near the
+  real cause. Fixed by adding `align=center` to `every node/.style` on both
+  the component-map and sequence-diagram `tikzpicture` environments.
 
 ## What I learned
 
