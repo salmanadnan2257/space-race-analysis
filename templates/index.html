@@ -1,0 +1,245 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Space Race Analysis Dashboard</title>
+  <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #f8fafc;
+      --card: #ffffff;
+      --text: #0f172a;
+      --muted: #475569;
+      --accent: #2563eb;
+      --border: #e2e8f0;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #0b1220;
+        --card: #131c2e;
+        --text: #e2e8f0;
+        --muted: #94a3b8;
+        --accent: #60a5fa;
+        --border: #24324a;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      padding: 24px;
+    }
+    .wrap { max-width: 1200px; margin: 0 auto; }
+    h1 { font-size: 1.6rem; margin-bottom: 4px; }
+    p.sub { color: var(--muted); margin-top: 0; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 20px;
+      margin-bottom: 24px;
+    }
+    .filters {
+      display: grid;
+      grid-template-columns: 1.4fr 1.4fr 1fr;
+      gap: 20px;
+      align-items: end;
+    }
+    @media (max-width: 800px) {
+      .filters { grid-template-columns: 1fr; }
+    }
+    label { display: block; font-size: 0.8rem; color: var(--muted); text-transform: uppercase;
+            letter-spacing: 0.03em; margin-bottom: 6px; }
+    select[multiple] {
+      width: 100%; height: 130px; background: var(--bg); color: var(--text);
+      border: 1px solid var(--border); border-radius: 6px; padding: 6px;
+    }
+    .year-row { display: flex; gap: 12px; align-items: center; }
+    input[type=number] {
+      width: 90px; background: var(--bg); color: var(--text);
+      border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px;
+    }
+    .buttons { display: flex; gap: 10px; margin-top: 14px; flex-wrap: wrap; }
+    button {
+      background: var(--accent); color: white; border: none; border-radius: 6px;
+      padding: 8px 16px; font-size: 0.9rem; cursor: pointer;
+    }
+    button.secondary { background: transparent; color: var(--accent); border: 1px solid var(--accent); }
+    .grid-stats {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 16px;
+    }
+    .stat .label { font-size: 0.8rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.03em; }
+    .stat .value { font-size: 1.4rem; font-weight: 600; }
+    .charts-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 24px;
+    }
+    @media (max-width: 900px) {
+      .charts-grid { grid-template-columns: 1fr; }
+    }
+    .chart-box { min-height: 380px; }
+    .full-width { grid-column: 1 / -1; }
+    #status-msg { color: var(--muted); font-size: 0.85rem; margin-left: 8px; }
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Space Race Analysis Dashboard</h1>
+  <p class="sub">
+    4,324 launches, 56 organisations, {{ year_min }}-{{ year_max }}. Filter by
+    organisation, country, and launch year to explore live; every chart below
+    re-slices the real dataset, nothing is precomputed per combination.
+  </p>
+
+  <div class="card">
+    <div class="filters">
+      <div>
+        <label for="org-select">Organisations (none selected = all)</label>
+        <select id="org-select" multiple>
+          {% for org in organisations %}
+          <option value="{{ org }}">{{ org }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label for="country-select">Countries (none selected = all)</label>
+        <select id="country-select" multiple>
+          {% for c in countries %}
+          <option value="{{ c.code }}">{{ c.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label>Launch year range</label>
+        <div class="year-row">
+          <input type="number" id="year-start" min="{{ year_min }}" max="{{ year_max }}" value="{{ year_min }}">
+          <span>to</span>
+          <input type="number" id="year-end" min="{{ year_min }}" max="{{ year_max }}" value="{{ year_max }}">
+        </div>
+      </div>
+    </div>
+    <div class="buttons">
+      <button id="apply-btn">Apply filters</button>
+      <button class="secondary" id="reset-btn">Reset</button>
+      <button class="secondary" id="preset-coldwar">USA vs USSR (1957-1991)</button>
+      <button class="secondary" id="preset-top10">Top 10 organisations</button>
+      <span id="status-msg"></span>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="grid-stats" id="stats-row">
+      <div class="stat"><div class="label">Launches</div><div class="value" id="stat-total">{{ stats.total_launches }}</div></div>
+      <div class="stat"><div class="label">Organisations</div><div class="value" id="stat-orgs">{{ stats.organisations }}</div></div>
+      <div class="stat"><div class="label">Success rate</div><div class="value" id="stat-success">{{ stats.success_rate }}%</div></div>
+      <div class="stat"><div class="label">Top organisation</div><div class="value" id="stat-top-org">{{ stats.top_organisation }} ({{ stats.top_organisation_count }})</div></div>
+      <div class="stat"><div class="label">Year range</div><div class="value" id="stat-year-range">{{ stats.year_range }}</div></div>
+    </div>
+  </div>
+
+  <div class="charts-grid">
+    <div class="card chart-box"><div id="org-bar" style="width:100%;height:340px;"></div></div>
+    <div class="card chart-box"><div id="year-line" style="width:100%;height:340px;"></div></div>
+    <div class="card chart-box"><div id="status-bar" style="width:100%;height:340px;"></div></div>
+    <div class="card chart-box"><div id="choropleth" style="width:100%;height:340px;"></div></div>
+    <div class="card chart-box full-width"><div id="sunburst" style="width:100%;height:520px;"></div></div>
+  </div>
+</div>
+
+<script>
+  const initialFigures = {{ figures_json | safe }};
+  const top10Organisations = {{ top_10_organisations_json | safe }};
+  const config = {responsive: true, displaylogo: false};
+
+  Plotly.newPlot('org-bar', initialFigures.org_bar.data, initialFigures.org_bar.layout, config);
+  Plotly.newPlot('year-line', initialFigures.year_line.data, initialFigures.year_line.layout, config);
+  Plotly.newPlot('status-bar', initialFigures.status_bar.data, initialFigures.status_bar.layout, config);
+  Plotly.newPlot('choropleth', initialFigures.choropleth.data, initialFigures.choropleth.layout, config);
+  Plotly.newPlot('sunburst', initialFigures.sunburst.data, initialFigures.sunburst.layout, config);
+
+  function selectedValues(selectEl) {
+    return Array.from(selectEl.selectedOptions).map(o => o.value);
+  }
+
+  function setSelected(selectEl, values) {
+    const set = new Set(values);
+    Array.from(selectEl.options).forEach(o => { o.selected = set.has(o.value); });
+  }
+
+  function updateStats(stats) {
+    document.getElementById('stat-total').textContent = stats.total_launches;
+    document.getElementById('stat-orgs').textContent = stats.organisations;
+    document.getElementById('stat-success').textContent = (stats.success_rate === null ? '-' : stats.success_rate + '%');
+    document.getElementById('stat-top-org').textContent = stats.top_organisation
+      ? `${stats.top_organisation} (${stats.top_organisation_count})` : '-';
+    document.getElementById('stat-year-range').textContent = stats.year_range || '-';
+  }
+
+  async function applyFilters() {
+    const orgSelect = document.getElementById('org-select');
+    const countrySelect = document.getElementById('country-select');
+    const yearStart = parseInt(document.getElementById('year-start').value, 10);
+    const yearEnd = parseInt(document.getElementById('year-end').value, 10);
+    const statusMsg = document.getElementById('status-msg');
+    statusMsg.textContent = 'Updating...';
+
+    const body = {
+      organisations: selectedValues(orgSelect),
+      countries: selectedValues(countrySelect),
+      year_start: yearStart,
+      year_end: yearEnd,
+    };
+
+    const resp = await fetch('/api/filter', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body),
+    });
+    if (!resp.ok) {
+      statusMsg.textContent = 'Error updating charts.';
+      return;
+    }
+    const payload = await resp.json();
+    Plotly.react('org-bar', payload.figures.org_bar.data, payload.figures.org_bar.layout, config);
+    Plotly.react('year-line', payload.figures.year_line.data, payload.figures.year_line.layout, config);
+    Plotly.react('status-bar', payload.figures.status_bar.data, payload.figures.status_bar.layout, config);
+    Plotly.react('choropleth', payload.figures.choropleth.data, payload.figures.choropleth.layout, config);
+    Plotly.react('sunburst', payload.figures.sunburst.data, payload.figures.sunburst.layout, config);
+    updateStats(payload.stats);
+    statusMsg.textContent = `Updated (${payload.stats.total_launches} launches match).`;
+  }
+
+  document.getElementById('apply-btn').addEventListener('click', applyFilters);
+
+  document.getElementById('reset-btn').addEventListener('click', () => {
+    setSelected(document.getElementById('org-select'), []);
+    setSelected(document.getElementById('country-select'), []);
+    document.getElementById('year-start').value = {{ year_min }};
+    document.getElementById('year-end').value = {{ year_max }};
+    applyFilters();
+  });
+
+  document.getElementById('preset-coldwar').addEventListener('click', () => {
+    setSelected(document.getElementById('org-select'), ['NASA', 'RVSN USSR']);
+    setSelected(document.getElementById('country-select'), []);
+    document.getElementById('year-start').value = {{ year_min }};
+    document.getElementById('year-end').value = 1991;
+    applyFilters();
+  });
+
+  document.getElementById('preset-top10').addEventListener('click', () => {
+    setSelected(document.getElementById('org-select'), top10Organisations);
+    setSelected(document.getElementById('country-select'), []);
+    document.getElementById('year-start').value = {{ year_min }};
+    document.getElementById('year-end').value = {{ year_max }};
+    applyFilters();
+  });
+</script>
+</body>
+</html>
