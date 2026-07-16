@@ -1,0 +1,396 @@
+% explainer-source-hash: 2357571f86ceba5334e2c0d72b505fd94cbed946440584449b65bfa05ec75144
+% explainer-source-commit: b233236e08415f219e32fe27532bd07a809fbbbc
+% explainer-generated: 2026-07-16
+% Regenerate with /explain-all (see WIRING.md). Do not edit this stamp by hand:
+% it is how the toolchain knows whether this document still matches the code.
+\documentclass[11pt,a4paper]{article}
+\input{preamble}
+
+\title{\textbf{Space Race Analysis}\\[4pt]\large A Brief}
+\author{Portfolio explainer}
+\date{}
+
+\begin{document}
+\maketitle
+\thispagestyle{empty}
+
+\section*{In one paragraph}
+\addcontentsline{toc}{section}{In one paragraph}
+
+Space Race Analysis turns one scraped spreadsheet of 4,324 rocket launches (1957 to 2020)
+into charts. Two programs sit on top of that file: \file{space\_race\_analysis.py}, a linear
+script that writes 17 chart files into \file{output/} and exits; and \file{app.py}, a small
+Flask dashboard serving five charts you can filter live in a browser. The cleaning is short
+(drop two junk columns, map each launch's location to a country code, pull out the year) and
+everything else is chart drawing. Every headline number in the README is accurate and was
+re-verified for this document. The weakness is not in the arithmetic: it is that four charts
+are titled as showing something they do not show, and the project's marquee result, the
+``USA vs USSR'' comparison, understates the USA by roughly a factor of four.
+
+\tableofcontents
+\vspace{4mm}
+
+\section{Shape}
+
+One input, two consumers that never speak to each other.
+
+\begin{figure}[H]
+\centering
+\resizebox{\textwidth}{!}{
+\begin{tikzpicture}[every node/.style={align=center}]
+  \node[store] (csv) {\code{mission\_launches.csv}\\{\scriptsize 4{,}324 launches, 56 organisations}};
+  \node[box, above right=2mm and 24mm of csv] (script) {\file{space\_race\_analysis.py}\\{\scriptsize clean + chart, inline}};
+  \node[box, below right=2mm and 24mm of csv] (loader) {\file{data\_loader.py}\\{\scriptsize \code{load\_data()}}};
+  \node[store, right=22mm of script] (out) {\file{output/}\\{\scriptsize 15 PNG + 2 HTML}};
+  \node[box, right=22mm of loader] (flask) {\file{app.py}\\{\scriptsize Flask + Plotly}};
+  \node[extbox, right=30mm of flask] (br) {browser\\{\scriptsize live filters}};
+  \draw[flow] (csv) -- (script);
+  \draw[flow] (csv) -- (loader);
+  \draw[flow] (script) -- (out);
+  \draw[flow] (loader) -- (flask);
+  \draw[flow] (flask.north east) to[out=25, in=155]
+        node[lbl, above]{JSON figures} (br.north west);
+  \draw[dflow] (br.south west) to[out=-155, in=-25]
+        node[lbl, below]{\code{POST /api/filter}} (flask.south east);
+\end{tikzpicture}}
+\caption{The two pipelines share the CSV and the cleaning recipe, but not the code:
+the static script does not import the shared loader. It reimplements it.}
+\end{figure}
+
+That duplication is deliberate and the loader's docstring explains why (the script was left
+untouched so it could not regress). The two do currently agree, verified. But the README
+claims they match ``by construction'', and that is one word too strong: identical-by-construction
+is what you get when both callers run the same code. These run two copies of one recipe, so
+they agree by discipline, and only until someone edits one of them.
+
+\section{The data and its cleaning}
+
+\begin{keyidea}{The whole cleaning pipeline, and what it does not do}
+Drop duplicates; drop two junk columns; map \code{Location} to an ISO country code; parse
+\code{Date} and derive \code{Year} and \code{Month}. Row count in: 4,324. Row count out:
+4,324. No step removes a single row.
+\end{keyidea}
+
+Three of those steps deserve a note.
+
+\textbf{The junk columns} are named \code{Unnamed: 0} and \code{Unnamed: 0.1} because the
+CSV's header begins with an empty field followed by a field literally named
+\code{Unnamed: 0}. pandas invents the name \code{Unnamed: 0} for the empty one, collides with
+the real one, and appends a suffix to break the tie. The file carries two generations of the
+same ``save the row numbers by accident'' mistake, and the drop removes both.
+
+\textbf{Duplicate dropping is a no-op}, and structurally cannot be anything else. There are
+zero duplicate rows in the file. More interestingly, there could never be one: the two
+columns being dropped are row counters, unique by definition, and they are dropped
+\emph{after} \code{drop\_duplicates()} runs. Every row is guaranteed distinct while the check
+is looking at it. Swapping the two lines would make the check meaningful.
+
+\textbf{The country lookup} splits \code{Location} on its last comma and asks \code{pycountry}
+to resolve the result, returning \code{None} rather than crashing when it cannot. It fails on
+36 of 4,324 rows.
+
+\begin{honest}{The README's caveat about this is wrong, and the truth is better}
+The README warns that the lookup ``undercounts USSR-era launches''. Measured: all 36 failures
+are the same string, \code{Pacific Ocean} (the sea-launch platform), and \textbf{not one
+Soviet launch is dropped}. All 1,777 \code{RVSN USSR} rows resolve.
+
+The real distortion is subtler. \code{pycountry} knows only present-day countries, so Soviet
+launches are reattributed to whichever modern state now holds the site. Baikonur, which
+launched Sputnik and Gagarin, is in Kazakhstan, so 579 Soviet launches are filed under
+\code{KAZ}, a country that never had a space programme. The map does not lose the USSR, it
+dismembers it. That is defensible (there is no ISO code for a state that dissolved in 1991)
+and needs a caption, not a code change. But it is not what the README says.
+\end{honest}
+
+\section{What the data actually shows}
+
+Two results are worth the whole project.
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}
+\begin{axis}[
+  width=\textwidth, height=5.2cm,
+  xlabel={Year}, ylabel={Launches},
+  xmin=1955, xmax=2022, ymin=0, ymax=130,
+  grid=major, grid style={linegrey, very thin},
+  tick label style={font=\scriptsize}, label style={font=\small},
+]
+\addplot[accent, thick, mark=none] coordinates {
+(1957,3) (1958,28) (1959,20) (1960,39) (1961,52) (1962,82) (1963,41) (1964,60)
+(1965,87) (1966,101) (1967,106) (1968,103) (1969,103) (1970,107) (1971,119)
+(1972,99) (1973,103) (1974,98) (1975,113) (1976,113) (1977,114) (1978,97)
+(1979,49) (1980,55) (1981,71) (1982,67) (1983,66) (1984,69) (1985,74)
+(1986,62) (1987,56) (1988,59) (1989,52) (1990,80) (1991,59) (1992,62)
+(1993,61) (1994,64) (1995,61) (1996,60) (1997,70) (1998,68) (1999,57)
+(2000,57) (2001,43) (2002,49) (2003,52) (2004,40) (2005,37) (2006,49)
+(2007,50) (2008,48) (2009,50) (2010,37) (2011,42) (2012,38) (2013,46)
+(2014,53) (2015,52) (2016,90) (2017,92) (2018,117) (2019,109) (2020,63)
+};
+\draw[dashed, warnred] (axis cs:1991,0) -- (axis cs:1991,130);
+\node[font=\scriptsize, text=warnred, anchor=south east] at (axis cs:1990,113) {USSR dissolves};
+\end{axis}
+\end{tikzpicture}
+\caption{Launches per year, from the project's own cleaned data. A plateau near 100 a year
+through the 1970s, a collapse after 1978, a long trough, and a recovery after 2015. 2020 is
+short because the scrape stopped in August.}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}
+\begin{axis}[
+  width=\textwidth, height=4.8cm,
+  xlabel={Year}, ylabel={Failure rate (\%)},
+  xmin=1955, xmax=2022, ymin=0, ymax=80,
+  grid=major, grid style={linegrey, very thin},
+  tick label style={font=\scriptsize}, label style={font=\small},
+]
+\addplot[warnred, thick, mark=none] coordinates {
+(1957,33.3) (1958,71.4) (1959,45.0) (1960,51.3) (1961,32.7) (1962,18.3)
+(1963,29.3) (1964,16.7) (1965,12.6) (1966,9.9) (1967,10.4) (1968,5.8)
+(1969,16.5) (1970,9.3) (1971,10.1) (1972,7.1) (1973,6.8) (1974,7.1)
+(1975,5.3) (1976,2.7) (1977,3.5) (1978,1.0) (1979,4.1) (1980,5.5)
+(1981,2.8) (1982,4.5) (1983,1.5) (1984,1.4) (1985,6.8) (1986,6.5)
+(1987,3.6) (1988,1.7) (1989,1.9) (1990,3.8) (1991,5.1) (1992,4.8)
+(1993,6.6) (1994,6.2) (1995,8.2) (1996,5.0) (1997,4.3) (1998,7.4)
+(1999,10.5) (2000,7.0) (2001,2.3) (2002,4.1) (2003,5.8) (2004,2.5)
+(2005,8.1) (2006,6.1) (2007,4.0) (2008,4.2) (2009,6.0) (2010,8.1)
+(2011,2.4) (2012,7.9) (2013,4.3) (2014,1.9) (2015,5.8) (2016,2.2)
+(2017,6.5) (2018,1.7) (2019,5.5) (2020,9.5)
+};
+\end{axis}
+\end{tikzpicture}
+\caption{The project's most defensible result: rocketry went from losing half its launches to
+losing a few percent, within roughly a decade. Early years are noisy because the denominators
+are tiny (1957 flew 3 launches). Overall: 3,879 successes against 339 failures, 102 partial
+and 4 prelaunch, an 89.7\% success rate.}
+\end{figure}
+
+\section{The four charts that overclaim}
+
+\begin{honest}{``USA vs USSR'' does not compare the USA to the USSR}
+Charts 12 and 13 filter to two \emph{organisations}: \code{NASA} and \code{RVSN USSR}. But
+\code{RVSN USSR} (the Strategic Rocket Forces) ran essentially the entire Soviet programme,
+while NASA flew only \textbf{203 of the 1,351} launches from American soil, which is
+\textbf{15\%}. The rest were General Dynamics (251), the US Air Force (161), ULA (140),
+Boeing (136), Martin Marietta (114), SpaceX (100) and others. American spaceflight was mostly
+military and contractor work; NASA is the famous name, not the busy one. So the chart sets
+15\% of one side against ~100\% of the other and reports a national scoreboard.
+
+Measured: the pie reads NASA \textbf{10.3\%} over all years, and the same logic gives
+\textbf{5.9\%} for the Cold War era. Counted by launch country over that era it is
+\textbf{USA 662 against RUS+KAZ 1,770}, or \textbf{27.2\%}. The chart understates the
+American share about 4.6-fold. The USSR really did out-launch the USA roughly 2.5 to 1,
+which is a genuine finding; the chart claims 9 to 1. Chart 13 compounds this by running to
+2020, thirty years after its subject ceased to exist.
+
+The \code{Country} column needed to fix this already exists in the dataframe.
+\end{honest}
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}
+\begin{axis}[
+  ybar, width=\textwidth, height=4.4cm, bar width=15pt,
+  ylabel={Share of launches (\%)},
+  symbolic x coords={As charted (all years),As charted (to 1991),By country (to 1991)},
+  xtick=data, ymin=0, ymax=115,
+  nodes near coords, nodes near coords style={font=\scriptsize},
+  tick label style={font=\scriptsize}, label style={font=\small},
+  legend style={font=\scriptsize, at={(0.5,-0.24)}, anchor=north, legend columns=2, draw=linegrey},
+  grid=major, grid style={linegrey, very thin},
+]
+\addplot[fill=accent, draw=inkblue] coordinates {
+  (As charted (all years),10.3) (As charted (to 1991),5.9) (By country (to 1991),27.2)};
+\addlegendentry{USA side}
+\addplot[fill=warnred!70, draw=warnred] coordinates {
+  (As charted (all years),89.7) (As charted (to 1991),94.1) (By country (to 1991),72.8)};
+\addlegendentry{Soviet side}
+\end{axis}
+\end{tikzpicture}
+\caption{The size of the distortion. The first two columns use NASA as a stand-in for the
+USA, as the code does; the third uses the \code{Country} column the project already derives.
+All six numbers were computed from the project's own cleaned dataframe.}
+\end{figure}
+
+\begin{honest}{The choropleth is coloured by country, not by launch count}
+Chart 05 is titled ``Number of Launches by Country'' and passes \code{color='Country'}, the
+ISO code. The count lives in a different column, handed only to \code{hover\_data}. Since the
+codes are strings, Plotly treats them as categorical and \emph{silently ignores}
+\code{color\_continuous\_scale='matter'}. Confirmed by building the figure: the correct call
+yields one trace with a colour axis, this one yields \textbf{15 separate traces} and a layout
+with \textbf{no colour axis}. So Russia (1,398 launches) and Brazil (3) are two arbitrary
+colours of equal visual weight, and the quantity appears only on hover.
+
+The fix is one word. \file{app.py} \emph{already does it right} (\code{color='Launches'}); the
+dashboard fixed the bug and the static script was never updated.
+\end{honest}
+
+\begin{honest}{The price histogram shows two bars}
+\code{bins=20} spreads 20 buckets across the full price range, and prices run from 5.3 to
+5,000, so each bucket is about 250 wide. \code{xlim(0, 1000)} then crops to the first four,
+of which two are non-empty. The rendered PNG was opened: two bars, and roughly 60\% empty
+canvas. One outlier sets the bin width for all 964 priced launches, and the crop then hides
+the outlier that caused it.
+
+The distribution underneath is genuinely interesting: median 62, and 98.4\% of priced
+launches at 500 or less. A two-bar chart cannot show that. Only 964 of 4,324 launches (22\%)
+report a price at all, and the code is right to \code{dropna} rather than treat missing as
+zero; every price conclusion describes the 22\% who disclose, not the industry.
+\end{honest}
+
+\begin{honest}{Chart 17 plots all 56 organisations and its legend covers the plot}
+Its comment promises ``the Organisation Doing the Most Launches'' year on year. The code
+computes no maximum; it draws 56 overlapping lines. The rendered PNG was opened: the legend
+needs 56 entries, grows taller than the figure, and physically covers the 1957 to 1975 region
+of the plot. matplotlib recycles its palette every 10 colours, so the legend cannot identify
+anything anyway. Chart 11 is the same chart done correctly, restricted to the top 10, six
+lines earlier, which suggests (inferred, not proven) that 17 is a copy of 11 with the filter
+dropped.
+\end{honest}
+
+Two smaller ones, for completeness. Chart 07 plots years ordered by \emph{launch count}
+rather than chronologically, because a bare \code{value\_counts()} sorts by frequency; it is
+a misleading near-duplicate of chart 16, which does it right. And chart 09 draws one straight
+line from 1973 to 1981 across eight years that contain no price data at all, because pandas
+plots against an index that simply omits them.
+
+\section{The dashboard}
+
+\file{app.py} loads the cleaned frame once into a module-level global and re-slices it in
+memory on every request. Nothing is precomputed per filter combination, so a filtered view is
+always a real \code{pandas} slice. At 4,324 rows this is instant, and the design is right:
+the data is far too small to justify a database.
+
+The good decisions here are worth naming. The organisation list, the country list, the year
+bounds and the ``Top 10'' shortcut are all derived from the data rather than hardcoded, so
+the UI cannot drift out of sync with the CSV. Empty multi-select means ``no restriction'',
+which matches what the labels promise. Bad year input returns HTTP 400 (verified), and the
+empty-selection case is guarded explicitly in both the stats builder and the figure builders
+rather than being left to raise \code{IndexError} (verified: an unknown organisation returns
+200 with empty figures, not a crash). That is more care than a portfolio dashboard usually
+gets.
+
+The odd-looking \code{json.loads(json.dumps(fig, cls=PlotlyJSONEncoder))} is a type-laundering
+step, not confusion: Plotly figures hold numpy types that plain \code{json.dumps} refuses,
+and Flask's \code{jsonify} needs a dict rather than a pre-serialised string, so the figure is
+serialised by the encoder that understands it and parsed straight back into native types.
+
+\begin{honest}{The dashboard needs the internet to draw anything}
+Plotly.js is loaded from a public CDN. Offline, every \code{Plotly.newPlot} raises
+\code{ReferenceError: Plotly is not defined} and the page renders as empty boxes with working
+filters and no charts, silently. For a project whose selling point is running locally against
+a committed CSV, that is an odd seam. The version is pinned (\code{2.35.2}), which handles the
+supply-chain half of the worry but not the availability half.
+
+Separately, \file{index.html} hardcodes ``4,324 launches, 56 organisations'' in its subtitle
+while the stat tiles directly beneath it are rendered from the live data. The moment the CSV
+changes, the subtitle lies and the tile below it tells the truth.
+\end{honest}
+
+\section{Verification}
+
+Nothing here is taken on trust. A clean virtual environment was built from
+\file{requirements.txt}; the script ran to completion (exit 0, 17 files); the dashboard was
+started and both routes exercised; and the cleaning was replicated independently to check
+every count.
+
+\begin{table}[H]
+\centering
+\small
+\begin{tabular}{@{}p{7.6cm}l@{}}
+\toprule
+\textbf{Claim} & \textbf{Result} \\
+\midrule
+4,324 launches, 56 organisations & \textbf{confirmed} \\
+964 priced launches, about 22\% & \textbf{confirmed} (22.3\%) \\
+25 organisations in the spend table & \textbf{confirmed} \\
+17 chart files written to \file{output/} & \textbf{confirmed}, exit 0 \\
+Cold War filter: 1,876 launches, 111 NASA / 1,765 RVSN USSR & \textbf{confirmed}, via the live API \\
+Committed PNGs match a fresh run & \textbf{byte-identical} \\
+\midrule
+``drops duplicate rows'' & \textbf{no-op}, 0 exist \\
+``undercounts USSR-era launches'' & \textbf{false}, 0 Soviet rows dropped \\
+``the CSV happens to be clean'' & \textbf{false}, mojibake in 341 values \\
+Chart 05 colours by launch count & \textbf{false}, 15 categorical traces \\
+Chart 13 compares USA to USSR & \textbf{false}, NASA is 15\% of the USA \\
+Chart 17 shows the yearly leader & \textbf{false}, plots all 56 \\
+\bottomrule
+\end{tabular}
+\caption{Every README figure checks out. The lower block is where the code, the data or the
+chart titles disagree with what is claimed.}
+\end{table}
+
+\begin{keyidea}{The committed output is reproducible}
+Re-running the script regenerated all 15 PNGs byte-for-byte identically to the committed
+ones; only the two Plotly HTML files differed, and only in an embedded version string. The
+charts in \file{output/} are exactly what this code produces, which is a stronger guarantee
+than most analysis projects can offer.
+\end{keyidea}
+
+On data quality, one correction to the README: the CSV is not clean. One organisation is
+stored as \code{Arm??e de l'Air} with two literal question marks where an accent belonged,
+and 341 \code{Location} and \code{Detail} values carry broken multi-byte sequences from the
+scrape. It does not affect the analysis (\code{Detail} is never used, and \code{Location} is
+only split on its last comma), but the README asserts the opposite and a grep finds it in
+seconds.
+
+\section{Defending it}
+
+\begin{keyidea}{Lead with the bugs}
+The strengths are real: saving every figure to disk before optionally showing it (which is
+what let the whole thing be verified headless), fixing the pandas \code{value\_counts()}
+naming trap by mapping on keys instead of positions, dropping missing prices rather than
+zero-filling them, deriving the UI's options from the data, and committing output that
+reproduces byte-for-byte.
+
+But four chart titles overclaim, and each is findable in a minute by anyone reading the
+code. Volunteering them turns each from a liability into evidence of judgement:
+
+\begin{enumerate}
+\item \textbf{The USA vs USSR chart is wrong.} NASA is 15\% of American launches, so it says
+      9:1 where the truth is about 2.5:1. Say this first; it defuses the rest.
+\item \textbf{The choropleth colours by identity, not count.} One argument. \file{app.py}
+      already has it right.
+\item \textbf{The price histogram shows two bars} because one 5,000 outlier sets the bin
+      width. The real distribution: median 62, 98.4\% under 500.
+\item \textbf{The duplicate check can never fire}, because the row-number columns are dropped
+      after it runs. Noticing that about your own code is worth more than the check.
+\end{enumerate}
+
+Then the best story here: the country lookup does not lose the USSR, it reattributes it, and
+files 579 Soviet launches from Baikonur under Kazakhstan. Knowing exactly how your data is
+wrong, rather than vaguely that it might be, is the job.
+\end{keyidea}
+
+\section*{Glossary}
+\addcontentsline{toc}{section}{Glossary}
+
+\begin{description}[leftmargin=!, labelwidth=2.8cm, font=\bfseries]
+\item[CSV] A plain-text table: one header line naming the columns, one line per record,
+  commas between cells. The project's input is one.
+\item[DataFrame] pandas' in-memory table, the central object of the project. A spreadsheet
+  with named columns that you operate on a whole column at a time. One column is a
+  \emph{Series}.
+\item[NaN] ``Not a Number'', pandas' marker for a cell the source never recorded. Contagious
+  in arithmetic, which is why missing prices must be dropped deliberately.
+\item[matplotlib] Python charting library producing static images (PNG). 15 of the 17 charts.
+\item[Plotly] Charting library producing structures a browser renders interactively (hover,
+  zoom, click). 2 static charts, plus all 5 dashboard charts.
+\item[Flask] A small Python web framework: it routes URLs to Python functions. Runs the
+  dashboard.
+\item[Choropleth] A map that colours each region by a value, so the colour \emph{is} the
+  data. Chart 05 is one, coloured by the wrong column.
+\item[Histogram] A distribution chart: chop the range into equal buckets, draw a bar per
+  bucket showing how many records landed in it. Bucket count is a judgement call.
+\item[ISO alpha-3] A three-letter standard country code (\code{USA}, \code{RUS},
+  \code{KAZ}). Map libraries want codes, not names, because names are ambiguous.
+\item[pycountry] Python wrapper around the official ISO country register. Knows only
+  \emph{present-day} countries, which is why the USSR gets split into \code{RUS} and
+  \code{KAZ}.
+\item[Mojibake] Text encoded in one character set and decoded as another, scrambling
+  non-English characters. Present in this project's source CSV.
+\end{description}
+
+\end{document}
